@@ -22,12 +22,12 @@
 #include <fcntl.h>
 #include <libconfig.h> /* read config files */
 #include <unistd.h> /* for getopt */
-#include <termios.h> /* used in kbhit() */
+#include "termios2.h" /* used in kbhit() */
 #include <getopt.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <pthread.h>
-#include <termios.h>
+#include "termios2.h"
 #include "msgqueue.h"
 #include "portthread.h"
 #include "network_layer.h"

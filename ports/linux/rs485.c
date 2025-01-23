@@ -23,7 +23,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <termios.h>
+#include "termios2.h"
+#include "termbits2.h"
 #include <unistd.h>
 #include <sched.h>
 #include <linux/serial.h> /* for struct serial_struct */
@@ -68,7 +69,7 @@ static struct termios RS485_oldtio;
 /* for setting custom divisor */
 static struct serial_struct RS485_oldserial;
 /* indicator of special baud rate */
-static bool RS485_SpecBaud = false;
+static uint32_t RS485_SpecBaud = 0;
 
 /* Ring buffer for incoming bytes, in order to speed up the receiving. */
 static FIFO_BUFFER Rx_FIFO;
@@ -159,7 +160,7 @@ uint32_t RS485_Get_Baud_Rate(void)
             baud = 19200;
             break;
         case B38400:
-            if (!RS485_SpecBaud) {
+            if (RS485_SpecBaud == 0) {
                 /* Linux asks for custom divisor
                    only when baud is set on 38400 */
                 baud = 38400;
@@ -327,7 +328,7 @@ bool RS485_Set_Baud_Rate(uint32_t baud)
             break;
         case 76800:
             RS485_Baud = B38400;
-            RS485_SpecBaud = true;
+            RS485_SpecBaud = baud;
             break;
         case 115200:
             RS485_Baud = B115200;
@@ -336,7 +337,8 @@ bool RS485_Set_Baud_Rate(uint32_t baud)
             RS485_Baud = B230400;
             break;
         default:
-            valid = false;
+            RS485_Baud = B38400;
+            RS485_SpecBaud = baud;
             break;
     }
 
@@ -546,42 +548,68 @@ void RS485_Initialize(void)
     memcpy(&newserial, &RS485_oldserial, sizeof(struct serial_struct));
     /* clear struct for new port settings */
     bzero(&newtio, sizeof(newtio));
-    /*
-       BAUDRATE: Set bps rate. You could also use cfsetispeed and cfsetospeed.
-       CRTSCTS : output hardware flow control (only used if the cable has
-       all necessary lines. See sect. 7 of Serial-HOWTO)
-       CS8     : 8n1 (8bit,no parity,1 stopbit)
-       CLOCAL  : local connection, no modem contol
-       CREAD   : enable receiving characters
-     */
-    newtio.c_cflag = RS485_Baud | CS8 | CLOCAL | CREAD | RS485MOD;
-    /* Raw input */
-    newtio.c_iflag = 0;
-    /* Raw output */
-    newtio.c_oflag = 0;
-    /* no processing */
-    newtio.c_lflag = 0;
-    /* activate the settings for the port after flushing I/O */
-    tcsetattr(RS485_Handle, TCSAFLUSH, &newtio);
-    if (RS485_SpecBaud) {
-        /* 76800, custom divisor must be set */
-        newserial.flags |= ASYNC_SPD_CUST;
-        newserial.custom_divisor = round(((float)newserial.baud_base) / 76800);
-        /* we must check that we calculated some sane value;
-           small baud bases yield bad custom divisor values */
-        baud_error = fabs(
-            1 -
-            ((float)newserial.baud_base) / ((float)newserial.custom_divisor) /
-                76800);
-        if ((newserial.custom_divisor == 0) || (baud_error > 0.02)) {
-            /* bad divisor */
+    if( RS485_SpecBaud == 0 )
+    {
+        /*
+        BAUDRATE: Set bps rate. You could also use cfsetispeed and cfsetospeed.
+        CRTSCTS : output hardware flow control (only used if the cable has
+        all necessary lines. See sect. 7 of Serial-HOWTO)
+        CS8     : 8n1 (8bit,no parity,1 stopbit)
+        CLOCAL  : local connection, no modem contol
+        CREAD   : enable receiving characters
+        */
+        newtio.c_cflag = RS485_Baud | CS8 | CLOCAL | CREAD | RS485MOD;
+        /* Raw input */
+        newtio.c_iflag = 0;
+        /* Raw output */
+        newtio.c_oflag = 0;
+        /* no processing */
+        newtio.c_lflag = 0;
+        /* activate the settings for the port after flushing I/O */
+        tcsetattr(RS485_Handle, TCSAFLUSH, &newtio);
+    }
+    else
+    {
+        struct termios2 tio;
+        ioctl(RS485_Handle, TCGETS2, &tio);
+        tio.c_cflag &= ~CBAUD;
+        tio.c_cflag |= BOTHER;
+        tio.c_ispeed = RS485_SpecBaud;
+        tio.c_ospeed = RS485_SpecBaud;
+        int r = ioctl(RS485_Handle, TCSETS2, &tio);
+
+        if (r == 0) {
+            printf("Changed successfully.\n");
+        } else {
             fprintf(
-                stderr, "RS485 bad custom divisor %d, base baud %d\n",
-                newserial.custom_divisor, newserial.baud_base);
-            exit(EXIT_FAILURE);
+                stderr, "RS485 bad baud %d: %d\n",
+                RS485_SpecBaud, r);
         }
-        /* if all goes well, set new divisor */
-        ioctl(RS485_Handle, TIOCSSERIAL, &newserial);
+    }
+
+    struct serial_rs485 rs485conf;
+    bzero(&rs485conf, sizeof(rs485conf));
+
+    /* Enable RS485 mode: */
+    rs485conf.flags |= SER_RS485_ENABLED;
+
+    /* Set logical level for RTS pin equal to 1 when sending: */
+    // rs485conf.flags |= SER_RS485_RTS_ON_SEND;
+    /* or, set logical level for RTS pin equal to 0 when sending: */
+    rs485conf.flags &= ~(SER_RS485_RTS_ON_SEND);
+
+    /* Set logical level for RTS pin equal to 1 after sending: */
+    rs485conf.flags |= SER_RS485_RTS_AFTER_SEND;
+    /* or, set logical level for RTS pin equal to 0 after sending: */
+    // rs485conf.flags &= ~(SER_RS485_RTS_AFTER_SEND);
+
+    /* Set this flag if you want to receive data even while sending data */
+    // rs485conf.flags |= SER_RS485_RX_DURING_TX;
+
+    rs485conf.delay_rts_before_send = 1;
+
+    if (ioctl (RS485_Handle, TIOCSRS485, &rs485conf) < 0) {
+        fprintf(stderr, "Failed to configure serial port for RS485.\n");
     }
 #if PRINT_ENABLED
     fprintf(stdout, "RS485 Baud Rate %u\n", RS485_Get_Baud_Rate());

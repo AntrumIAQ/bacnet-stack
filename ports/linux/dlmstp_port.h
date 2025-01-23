@@ -16,7 +16,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <termios.h>
+#include "termios2.h"
 /* BACnet Stack defines - first */
 #include "bacnet/bacdef.h"
 /* BACnet Stack API */

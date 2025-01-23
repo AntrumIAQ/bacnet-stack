@@ -20,7 +20,7 @@
 #include <stddef.h>
 #include "bacnet/bacdef.h"
 #include "bacnet/npdu.h"
-#include <termios.h>
+#include "termios2.h"
 #include "bacnet/basic/sys/fifo.h"
 #include "bacnet/basic/sys/ringbuf.h"
 /* defines specific to MS/TP */

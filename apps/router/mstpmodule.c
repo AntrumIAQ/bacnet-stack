@@ -15,7 +15,7 @@
 #include "mstpmodule.h"
 #include "bacnet/bacint.h"
 #include "dlmstp_port.h"
-#include <termios.h>
+#include "termios2.h"
 
 void *dl_mstp_thread(void *pArgs)
 {

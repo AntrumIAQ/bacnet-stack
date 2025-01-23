@@ -21,7 +21,7 @@
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <fcntl.h>
-#include <termios.h>
+#include "termios2.h"
 #include <unistd.h>
 #include <sched.h>
 
