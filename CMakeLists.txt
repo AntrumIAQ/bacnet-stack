@@ -25,6 +25,11 @@ option(
   ON)
 
 option(
+    BACNET_BUILD_SERVER_MINI_APP
+    "compile the server-mini app"
+    ON)
+
+option(
   BACNET_BUILD_SERVER_BASIC_APP
   "compile the server-basic app"
   ON)
@@ -920,6 +925,11 @@ if(BACNET_STACK_BUILD_APPS)
     target_link_libraries(piface PRIVATE ${PROJECT_NAME})
   endif(BACNET_BUILD_PIFACE_APP)
 
+  if(BACNET_BUILD_SERVER_MINI_APP)
+    add_executable(bacmini apps/server-mini/main.c)
+    target_link_libraries(bacmini PRIVATE ${PROJECT_NAME})
+  endif(BACNET_BUILD_SERVER_MINI_APP)
+
   if(BACNET_BUILD_SERVER_BASIC_APP)
     add_executable(bacbasic
       apps/server-basic/main.c
@@ -934,7 +944,7 @@ if(BACNET_STACK_BUILD_APPS)
       # Unreachable code because we have endless loop.
       $<$<C_COMPILER_ID:MSVC>:/wd4702>
     )
-  endif(BACNET_BUILD_BACMINI_APP)
+  endif(BACNET_BUILD_SERVER_BASIC_APP)
 
   if(BACNET_BUILD_BACPOLL_APP)
     add_executable(bacpoll
