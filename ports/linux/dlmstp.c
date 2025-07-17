@@ -267,14 +267,20 @@ static bool dlmstp_compare_data_expecting_reply(
         (reply.pdu_type == PDU_TYPE_ABORT) ||
         (reply.pdu_type == PDU_TYPE_SEGMENT_ACK)) {
         if (request.invoke_id != reply.invoke_id) {
-            debug_printf("DLMSTP: DER Compare failed: "
-                         "Invoke ID mismatch.\n");
+            debug_printf(
+                "DLMSTP: DER Compare failed: pdu %d "
+                "Invoke ID mismatch: request %d reply %d.\n",
+                reply.pdu_type, request.invoke_id, reply.invoke_id);
             return false;
         }
     } else {
         if (request.invoke_id != reply.invoke_id) {
-            debug_printf("DLMSTP: DER Compare failed: "
-                         "Invoke ID mismatch.\n");
+            debug_printf(
+                "DLMSTP: DER Compare failed: pdu %d "
+                "Invoke ID mismatch: request %d reply %d. "
+                "Service: request %d reply %d.\n",
+                reply.pdu_type, request.invoke_id, reply.invoke_id,
+                request.service_choice, reply.service_choice);
             return false;
         }
         if (request.service_choice != reply.service_choice) {
@@ -331,8 +337,21 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
         &mstp_port->InputBuffer[0], mstp_port->DataLength,
         mstp_port->SourceAddress, (uint8_t *)&pkt->buffer[0], pkt->length,
         pkt->destination_mac);
+
     if (!matched) {
-        return 0;
+        /* Walk the rest of the ring buffer to see if we can find a match */
+        while (!matched &&
+               (pkt = (struct mstp_pdu_packet *)Ringbuf_Peek_Next(
+                    &PDU_Queue, (uint8_t *)pkt)) != NULL) {
+            matched = dlmstp_compare_data_expecting_reply(
+                &mstp_port->InputBuffer[0], mstp_port->DataLength,
+                mstp_port->SourceAddress, (uint8_t *)&pkt->buffer[0],
+                pkt->length, pkt->destination_mac);
+        }
+        if (!matched) {
+            /* Still didn't find a match so just bail out */
+            return 0;
+        }
     }
     if (pkt->data_expecting_reply) {
         frame_type = FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY;
@@ -345,7 +364,8 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
         mstp_port->OutputBufferSize, frame_type, pkt->destination_mac,
         mstp_port->This_Station, (uint8_t *)&pkt->buffer[0], pkt->length);
     DLMSTP_Statistics.transmit_pdu_counter++;
-    (void)Ringbuf_Pop(&PDU_Queue, NULL);
+    /* This will pop the element no matter where we found it */
+    (void)Ringbuf_Pop_Element(&PDU_Queue, (uint8_t *)pkt, NULL);
 
     return pdu_len;
 }
@@ -459,9 +479,11 @@ uint16_t dlmstp_receive(
     /* see if there is a packet available, and a place
        to put the reply (if necessary) and process it */
     pthread_mutex_lock(&Receive_Packet_Mutex);
-    get_abstime(&abstime, timeout);
-    pthread_cond_timedwait(
-        &Receive_Packet_Flag, &Receive_Packet_Mutex, &abstime);
+    if (timeout > 0) {
+        get_abstime(&abstime, timeout);
+        pthread_cond_timedwait(
+            &Receive_Packet_Flag, &Receive_Packet_Mutex, &abstime);
+    }
     if (Receive_Packet.ready) {
         if (Receive_Packet.pdu_len) {
             DLMSTP_Statistics.receive_pdu_counter++;
@@ -496,11 +518,13 @@ static void *dlmstp_thread(void *pArg)
 
     (void)pArg;
     while (thread_alive) {
+        RS485_Check_UART_Data(&MSTP_Port);
         /* only do receive state machine while we don't have a frame */
         if ((MSTP_Port.ReceivedValidFrame == false) &&
             (MSTP_Port.ReceivedInvalidFrame == false)) {
-            RS485_Check_UART_Data(&MSTP_Port);
-            MSTP_Receive_Frame_FSM(&MSTP_Port);
+            if (MSTP_Port.DataAvailable) {
+                MSTP_Receive_Frame_FSM(&MSTP_Port);
+            }
             if (MSTP_Port.receive_state == MSTP_RECEIVE_STATE_PREAMBLE) {
                 if (Preamble_Callback) {
                     Preamble_Callback();
@@ -979,6 +1003,8 @@ void dlmstp_silence_reset(void *arg)
  */
 bool dlmstp_init(char *ifname)
 {
+    pthread_attr_t thread_attr;
+    struct sched_param sch_param;
     pthread_condattr_t attr;
     int rv = 0;
 
@@ -1065,11 +1091,42 @@ bool dlmstp_init(char *ifname)
         (MSTP_Port.CheckAutoBaud ? "true" : "false"));
     fflush(stderr);
 #endif
+    pthread_attr_init(&thread_attr);
+
+    // Set scheduling policy to SCHED_FIFO and priority
+    rv = pthread_attr_setinheritsched(&thread_attr, PTHREAD_EXPLICIT_SCHED);
+    if (rv != 0) {
+        fprintf(
+            stderr,
+            "MS/TP Interface: %s\n cannot setup thread schedule to explicit.\n",
+            ifname);
+        exit(1);
+    }
+    rv = pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
+    if (rv != 0) {
+        fprintf(
+            stderr,
+            "MS/TP Interface: %s\n cannot setup thread schedule policy to "
+            "FIFO.\n",
+            ifname);
+        exit(1);
+    }
+    sch_param.sched_priority = 99;
+    rv = pthread_attr_setschedparam(&thread_attr, &sch_param);
+    if (rv != 0) {
+        fprintf(
+            stderr, "MS/TP Interface: %s\n cannot setup thread priority.\n",
+            ifname);
+        exit(1);
+    }
     /* start one thread */
     Thread_Run = true;
-    rv = pthread_create(&hThread, NULL, dlmstp_thread, NULL);
+    rv = pthread_create(&hThread, &thread_attr, dlmstp_thread, NULL);
     if (rv != 0) {
-        fprintf(stderr, "Failed to start MS/TP thread\n");
+        fprintf(
+            stderr, "MS/TP Interface: %s\n Failed to start MS/TP thread.\n",
+            ifname);
+        exit(1);
     }
 
     return true;
