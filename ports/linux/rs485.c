@@ -259,8 +259,10 @@ void RS485_Check_UART_Data(struct mstp_port_struct_t *mstp_port)
         fifo = &poSharedData->Rx_FIFO;
     }
 
-    /* wait for state machine to read from the DataRegister */
-    if (mstp_port->DataAvailable == false) {
+    if (mstp_port->ReceiveError == true) {
+        /* do nothing but wait for state machine to clear the error */
+    } else if (mstp_port->DataAvailable == false) {
+        /* wait for state machine to read from the DataRegister */
         if (FIFO_Count(fifo) > 0) {
             /* data is available */
             mstp_port->DataRegister = FIFO_Get(fifo);
@@ -271,16 +273,16 @@ void RS485_Check_UART_Data(struct mstp_port_struct_t *mstp_port)
         }
     }
     /* grab bytes and stuff them into the FIFO every time */
-    // FD_ZERO(&input);
-    // FD_SET(handle, &input);
-    // n = select(handle + 1, &input, NULL, NULL, &waiter);
-    // if (FD_ISSET(handle, &input)) {
-    n = read(handle, buf, sizeof(buf));
-    if (n > 0) {
-        FIFO_Add(fifo, &buf[0], n);
-        debug_printf_hex(0, buf, n, "MSTP FIFO Add: ");
+    FD_ZERO(&input);
+    FD_SET(handle, &input);
+    n = select(handle + 1, &input, NULL, NULL, &waiter);
+    if (FD_ISSET(handle, &input)) {
+        n = read(handle, buf, sizeof(buf));
+        if (n > 0) {
+            FIFO_Add(fifo, &buf[0], n);
+            debug_printf_hex(0, buf, n, "MSTP FIFO Add: ");
+        }
     }
-    //}
     mstp_port->fifo_used = FIFO_Count(fifo);
 }
 

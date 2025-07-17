@@ -518,13 +518,11 @@ static void *dlmstp_thread(void *pArg)
 
     (void)pArg;
     while (thread_alive) {
-        RS485_Check_UART_Data(&MSTP_Port);
         /* only do receive state machine while we don't have a frame */
         if ((MSTP_Port.ReceivedValidFrame == false) &&
             (MSTP_Port.ReceivedInvalidFrame == false)) {
-            if (MSTP_Port.DataAvailable) {
-                MSTP_Receive_Frame_FSM(&MSTP_Port);
-            }
+            RS485_Check_UART_Data(&MSTP_Port);
+            MSTP_Receive_Frame_FSM(&MSTP_Port);
             if (MSTP_Port.receive_state == MSTP_RECEIVE_STATE_PREAMBLE) {
                 if (Preamble_Callback) {
                     Preamble_Callback();
