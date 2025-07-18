@@ -124,6 +124,9 @@ int dlmstp_send_pdu(
         }
     }
     pthread_mutex_unlock(&Ring_Buffer_Mutex);
+    if (!pkt) {
+        debug_printf("MS/TP: PDU Queue Full!");
+    }
 
     return bytes_sent;
 }
