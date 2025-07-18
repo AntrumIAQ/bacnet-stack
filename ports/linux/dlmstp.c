@@ -270,14 +270,14 @@ static bool dlmstp_compare_data_expecting_reply(
             return false;
     }
     /* these don't have service choice included */
-    if ((reply.pdu_type == PDU_TYPE_REJECT) ||
-        (reply.pdu_type == PDU_TYPE_ABORT) ||
-        (reply.pdu_type == PDU_TYPE_SEGMENT_ACK)) {
+    if ((request.pdu_type == PDU_TYPE_REJECT) ||
+        (request.pdu_type == PDU_TYPE_ABORT) ||
+        (request.pdu_type == PDU_TYPE_SEGMENT_ACK)) {
         if (request.invoke_id != reply.invoke_id) {
             debug_printf(
                 "DLMSTP: DER Compare failed: pdu %d "
                 "Invoke ID mismatch: request %d reply %d.\n",
-                reply.pdu_type, request.invoke_id, reply.invoke_id);
+                request.pdu_type, request.invoke_id, reply.invoke_id);
             return false;
         }
     } else {
@@ -286,7 +286,7 @@ static bool dlmstp_compare_data_expecting_reply(
                 "DLMSTP: DER Compare failed: pdu %d "
                 "Invoke ID mismatch: request %d reply %d. "
                 "Service: request %d reply %d.\n",
-                reply.pdu_type, request.invoke_id, reply.invoke_id,
+                request.pdu_type, request.invoke_id, reply.invoke_id,
                 request.service_choice, reply.service_choice);
             return false;
         }
