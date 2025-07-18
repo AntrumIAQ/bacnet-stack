@@ -29,7 +29,11 @@
 #include "rs485.h"
 
 /* packet queues */
-static DLMSTP_PACKET Receive_Packet;
+#ifndef MSTP_RECEIVE_PACKET_COUNT
+#define MSTP_RECEIVE_PACKET_COUNT 8
+#endif
+static DLMSTP_PACKET Receive_Buffer[MSTP_RECEIVE_PACKET_COUNT];
+static RING_BUFFER Receive_Queue;
 /* mechanism to wait for a packet */
 static pthread_cond_t Receive_Packet_Flag;
 static pthread_mutex_t Receive_Packet_Mutex;
@@ -397,25 +401,26 @@ uint16_t MSTP_Put_Receive(struct mstp_port_struct_t *mstp_port)
     uint16_t pdu_len = 0;
 
     pthread_mutex_lock(&Receive_Packet_Mutex);
-    if (Receive_Packet.ready) {
+    DLMSTP_PACKET *pkt = (DLMSTP_PACKET *)Ringbuf_Data_Peek(&Receive_Queue);
+    if (!pkt) {
         debug_printf("MS/TP: Dropped! Not Ready.\n");
     } else {
         /* bounds check - maybe this should send an abort? */
         pdu_len = mstp_port->DataLength;
-        if (pdu_len > sizeof(Receive_Packet.pdu)) {
-            pdu_len = sizeof(Receive_Packet.pdu);
+        if (pdu_len > sizeof(pkt->pdu)) {
+            pdu_len = sizeof(pkt->pdu);
         }
         if (pdu_len == 0) {
             debug_printf("MS/TP: PDU Length is 0!\n");
         }
         memmove(
-            (void *)&Receive_Packet.pdu[0], (void *)&mstp_port->InputBuffer[0],
-            pdu_len);
-        dlmstp_fill_bacnet_address(
-            &Receive_Packet.address, mstp_port->SourceAddress);
-        Receive_Packet.pdu_len = mstp_port->DataLength;
-        Receive_Packet.ready = true;
-        pthread_cond_signal(&Receive_Packet_Flag);
+            (void *)&pkt->pdu[0], (void *)&mstp_port->InputBuffer[0], pdu_len);
+        dlmstp_fill_bacnet_address(&pkt->address, mstp_port->SourceAddress);
+        pkt->pdu_len = mstp_port->DataLength;
+        pkt->ready = true;
+        if (Ringbuf_Data_Put(&Receive_Queue, (uint8_t *)pkt)) {
+            pthread_cond_signal(&Receive_Packet_Flag);
+        }
     }
     pthread_mutex_unlock(&Receive_Packet_Mutex);
 
@@ -466,8 +471,6 @@ static void get_abstime(struct timespec *abstime, unsigned long milliseconds)
  * @param pdu - place to put PDU data for the caller
  * @param max_pdu - number of bytes of PDU data that caller can receive
  * @return number of bytes in received packet, or 0 if no packet was received
- * @note Must be called at least once every 1 milliseconds, with no more than
- *  5 milliseconds jitter.
  */
 uint16_t dlmstp_receive(
     BACNET_ADDRESS *src, /* source address */
@@ -477,6 +480,7 @@ uint16_t dlmstp_receive(
 { /* milliseconds to wait for a packet */
     uint16_t pdu_len = 0;
     struct timespec abstime;
+    DLMSTP_PACKET *pkt;
 
     (void)max_pdu;
     /* see if there is a packet available, and a place
@@ -487,20 +491,20 @@ uint16_t dlmstp_receive(
         pthread_cond_timedwait(
             &Receive_Packet_Flag, &Receive_Packet_Mutex, &abstime);
     }
-    if (Receive_Packet.ready) {
-        if (Receive_Packet.pdu_len) {
+    if (!Ringbuf_Empty(&Receive_Queue)) {
+        pkt = (DLMSTP_PACKET *)Ringbuf_Peek(&Receive_Queue);
+        if (pkt->pdu_len) {
             DLMSTP_Statistics.receive_pdu_counter++;
             if (src) {
-                memmove(
-                    src, &Receive_Packet.address,
-                    sizeof(Receive_Packet.address));
+                memmove(src, &pkt->address, sizeof(pkt->address));
             }
             if (pdu) {
-                memmove(pdu, &Receive_Packet.pdu, sizeof(Receive_Packet.pdu));
+                memmove(pdu, &pkt->pdu, sizeof(pkt->pdu));
             }
-            pdu_len = Receive_Packet.pdu_len;
+            pdu_len = pkt->pdu_len;
         }
-        Receive_Packet.ready = false;
+        pkt->ready = false;
+        (void)Ringbuf_Pop(&Receive_Queue, NULL);
     }
     pthread_mutex_unlock(&Receive_Packet_Mutex);
 
@@ -1029,8 +1033,9 @@ bool dlmstp_init(char *ifname)
         &PDU_Queue, (uint8_t *)&PDU_Buffer, sizeof(struct mstp_pdu_packet),
         MSTP_PDU_PACKET_COUNT);
     /* initialize packet queue */
-    Receive_Packet.ready = false;
-    Receive_Packet.pdu_len = 0;
+    Ringbuf_Init(
+        &Receive_Queue, (uint8_t *)&Receive_Buffer, sizeof(DLMSTP_PACKET),
+        MSTP_RECEIVE_PACKET_COUNT);
     rv = pthread_cond_init(&Receive_Packet_Flag, &attr);
     if (rv != 0) {
         fprintf(
