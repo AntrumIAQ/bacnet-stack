@@ -148,11 +148,11 @@ int dlmstp_send_pdu(
         reply.invoke_id = pdu[roffset + 1];
         reply.service_choice = pdu[roffset + 2];
         debug_printf(
-            "MS/TP: PDU Queue: pdu %d Invoke ID: %d Service: %d.\n",
+            "DLMSTP: DER Queued: pdu %d Invoke ID: %d Service: %d.\n",
             reply.pdu_type, reply.invoke_id, reply.service_choice);
     }
     if (!pkt) {
-        debug_printf("MS/TP: PDU Queue Full!\n");
+        debug_printf("DLMSTP: DER Queue Full!\n");
     }
 
     return bytes_sent;
@@ -350,14 +350,17 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
     (void)timeout;
 
     pthread_mutex_lock(&Ring_Buffer_Mutex);
-    for (pkt = (struct mstp_pdu_packet *)Ringbuf_Peek(&PDU_Queue);
-         pkt && !matched; pkt = (struct mstp_pdu_packet *)Ringbuf_Peek_Next(
-                              &PDU_Queue, (uint8_t *)pkt)) {
+    for (pkt = (struct mstp_pdu_packet *)Ringbuf_Peek(&PDU_Queue); pkt;
+         pkt = (struct mstp_pdu_packet *)Ringbuf_Peek_Next(
+             &PDU_Queue, (uint8_t *)pkt)) {
         /* is this the reply to the DER? */
         matched = dlmstp_compare_data_expecting_reply(
             &mstp_port->InputBuffer[0], mstp_port->DataLength,
             mstp_port->SourceAddress, (uint8_t *)&pkt->buffer[0], pkt->length,
             pkt->destination_mac);
+        if (matched) {
+            break;
+        }
     }
     if (matched) {
         if (pkt->data_expecting_reply) {
