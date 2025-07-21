@@ -373,14 +373,13 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
         DLMSTP_Statistics.transmit_pdu_counter++;
         /* This will pop the element no matter where we found it */
         (void)Ringbuf_Pop_Element(&PDU_Queue, (uint8_t *)pkt, NULL);
-    } else {
-        /* Didn't find a match so wait for application layer to provide one */
-        usleep(1000);
     }
     pthread_mutex_unlock(&Ring_Buffer_Mutex);
     if (pdu_len) {
         debug_printf("DLMSTP: DER Found reply\n");
     } else {
+        /* Didn't find a match so wait for application layer to provide one */
+        usleep(1000);
         debug_printf("DLMSTP: DER Waiting for reply\n");
     }
 
