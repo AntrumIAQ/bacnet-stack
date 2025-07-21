@@ -91,6 +91,16 @@ void dlmstp_cleanup(void)
     pthread_mutex_destroy(&Master_Done_Mutex);
     pthread_mutex_destroy(&Ring_Buffer_Mutex);
 }
+/* One way to check the message is to compare NPDU
+   src, dest, along with the APDU type, invoke id.
+   Seems a bit overkill */
+struct DER_compare_t {
+    BACNET_NPDU_DATA npdu_data;
+    BACNET_ADDRESS address;
+    uint8_t pdu_type;
+    uint8_t invoke_id;
+    uint8_t service_choice;
+};
 
 /**
  * @brief send an PDU via MSTP
@@ -106,6 +116,8 @@ int dlmstp_send_pdu(
     uint8_t *pdu,
     unsigned pdu_len)
 {
+    uint16_t roffset;
+    struct DER_compare_t reply;
     int bytes_sent = 0;
     struct mstp_pdu_packet *pkt;
     unsigned i = 0;
@@ -128,15 +140,27 @@ int dlmstp_send_pdu(
         }
     }
     pthread_mutex_unlock(&Ring_Buffer_Mutex);
+    // log sent
+    roffset = (uint16_t)bacnet_npdu_decode(
+        pdu, pdu_len, &reply.address, NULL, &reply.npdu_data);
+    if (!reply.npdu_data.network_layer_message) {
+        reply.pdu_type = pdu[roffset] & 0xF0;
+        reply.invoke_id = pdu[roffset + 1];
+        reply.service_choice = pdu[roffset + 2];
+        debug_printf(
+            "MS/TP: PDU Queue: pdu %d Invoke ID: %d Service: %d.\n",
+            reply.pdu_type, reply.invoke_id, reply.service_choice);
+    }
     if (!pkt) {
-        debug_printf("MS/TP: PDU Queue Full!");
+        debug_printf("MS/TP: PDU Queue Full!\n");
     }
 
     return bytes_sent;
 }
 
 /**
- * @brief The MS/TP state machine uses this function for getting data to send
+ * @brief The MS/TP state machine uses this function for getting data to
+ * send
  * @param mstp_port - specific MSTP port that is used for this datalink
  * @param timeout - number of milliseconds to wait for the data
  * @return amount of PDU data
@@ -189,16 +213,6 @@ static bool dlmstp_compare_data_expecting_reply(
     uint8_t dest_address)
 {
     uint16_t offset;
-    /* One way to check the message is to compare NPDU
-       src, dest, along with the APDU type, invoke id.
-       Seems a bit overkill */
-    struct DER_compare_t {
-        BACNET_NPDU_DATA npdu_data;
-        BACNET_ADDRESS address;
-        uint8_t pdu_type;
-        uint8_t invoke_id;
-        uint8_t service_choice;
-    };
     struct DER_compare_t request;
     struct DER_compare_t reply;
 
@@ -321,8 +335,8 @@ static bool dlmstp_compare_data_expecting_reply(
 }
 
 /**
- * @brief The MS/TP state machine uses this function for getting data to send
- *  as the reply to a DATA_EXPECTING_REPLY frame, or nothing
+ * @brief The MS/TP state machine uses this function for getting data to
+ * send as the reply to a DATA_EXPECTING_REPLY frame, or nothing
  * @param mstp_port MSTP port structure for this port
  * @param timeout number of milliseconds to wait for a packet
  * @return number of bytes, or 0 if no reply is available
@@ -357,6 +371,7 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
         }
         if (!matched) {
             /* Still didn't find a match so just bail out */
+            usleep(1000);
             return 0;
         }
     }
@@ -470,7 +485,8 @@ static void get_abstime(struct timespec *abstime, unsigned long milliseconds)
  * @brief Run the MS/TP state machines, and get packet if available
  * @param pdu - place to put PDU data for the caller
  * @param max_pdu - number of bytes of PDU data that caller can receive
- * @return number of bytes in received packet, or 0 if no packet was received
+ * @return number of bytes in received packet, or 0 if no packet was
+ * received
  */
 uint16_t dlmstp_receive(
     BACNET_ADDRESS *src, /* source address */
@@ -913,7 +929,8 @@ void dlmstp_set_invalid_frame_rx_complete_callback(
 
 /**
  * @brief Set the MS/TP Preamble callback
- * @param cb_func - callback function to be called when a preamble is received
+ * @param cb_func - callback function to be called when a preamble is
+ * received
  */
 void dlmstp_set_frame_rx_start_callback(dlmstp_hook_frame_rx_start_cb cb_func)
 {
@@ -1104,7 +1121,8 @@ bool dlmstp_init(char *ifname)
     if (rv != 0) {
         fprintf(
             stderr,
-            "MS/TP Interface: %s\n cannot setup thread schedule to explicit.\n",
+            "MS/TP Interface: %s\n cannot setup thread schedule to "
+            "explicit.\n",
             ifname);
         exit(1);
     }
