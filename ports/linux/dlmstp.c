@@ -335,6 +335,45 @@ static bool dlmstp_compare_data_expecting_reply(
 }
 
 /**
+ * Add a certain number of nanoseconds to the specified time.
+ *
+ * @param ts - The time to which to add to.
+ * @param ns - The number of nanoseconds to add.  Allowed range
+ *      is -NS_PER_S..NS_PER_S (i.e., plus minus one second).
+ */
+static void timespec_add_ns(struct timespec *ts, long ns)
+{
+    /* nano-seconds per second */
+    const long NS_PER_S = 1000000000L;
+
+    ts->tv_nsec += ns;
+    if (ts->tv_nsec > NS_PER_S) {
+        ts->tv_nsec -= NS_PER_S;
+        ts->tv_sec += 1;
+    } else if (ts->tv_nsec < 0) {
+        ts->tv_nsec += NS_PER_S;
+        ts->tv_sec -= 1;
+    }
+}
+
+/**
+ * @brief Get abstime for use in thread
+ * @param abstime - place to put the absolute time
+ * @param milliseconds - number of milliseconds to add
+ */
+static void get_abstime(struct timespec *abstime, unsigned long milliseconds)
+{
+    clock_gettime(CLOCK_MONOTONIC, abstime);
+    if (milliseconds > 1000) {
+        fprintf(
+            stderr, "DLMSTP: limited timeout of %lums to 1000ms\n",
+            milliseconds);
+        milliseconds = 1000;
+    }
+    timespec_add_ns(abstime, 1000000 * milliseconds);
+}
+
+/**
  * @brief The MS/TP state machine uses this function for getting data to
  * send as the reply to a DATA_EXPECTING_REPLY frame, or nothing
  * @param mstp_port MSTP port structure for this port
@@ -347,6 +386,7 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
     bool matched = false;
     uint8_t frame_type = 0;
     struct mstp_pdu_packet *pkt;
+    struct timespec abstime;
     (void)timeout;
 
     pthread_mutex_lock(&Ring_Buffer_Mutex);
@@ -382,7 +422,10 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
         debug_printf("DLMSTP: DER Found reply\n");
     } else {
         /* Didn't find a match so wait for application layer to provide one */
-        usleep(1000);
+        get_abstime(&abstime, 1);
+        while (
+            0 !=
+            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abstime, NULL)) { }
         debug_printf("DLMSTP: DER Waiting for reply\n");
     }
 
@@ -437,45 +480,6 @@ uint16_t MSTP_Put_Receive(struct mstp_port_struct_t *mstp_port)
     pthread_mutex_unlock(&Receive_Packet_Mutex);
 
     return pdu_len;
-}
-
-/**
- * Add a certain number of nanoseconds to the specified time.
- *
- * @param ts - The time to which to add to.
- * @param ns - The number of nanoseconds to add.  Allowed range
- *      is -NS_PER_S..NS_PER_S (i.e., plus minus one second).
- */
-static void timespec_add_ns(struct timespec *ts, long ns)
-{
-    /* nano-seconds per second */
-    const long NS_PER_S = 1000000000L;
-
-    ts->tv_nsec += ns;
-    if (ts->tv_nsec > NS_PER_S) {
-        ts->tv_nsec -= NS_PER_S;
-        ts->tv_sec += 1;
-    } else if (ts->tv_nsec < 0) {
-        ts->tv_nsec += NS_PER_S;
-        ts->tv_sec -= 1;
-    }
-}
-
-/**
- * @brief Get abstime for use in thread
- * @param abstime - place to put the absolute time
- * @param milliseconds - number of milliseconds to add
- */
-static void get_abstime(struct timespec *abstime, unsigned long milliseconds)
-{
-    clock_gettime(CLOCK_MONOTONIC, abstime);
-    if (milliseconds > 1000) {
-        fprintf(
-            stderr, "DLMSTP: limited timeout of %lums to 1000ms\n",
-            milliseconds);
-        milliseconds = 1000;
-    }
-    timespec_add_ns(abstime, 1000000 * milliseconds);
 }
 
 /**
