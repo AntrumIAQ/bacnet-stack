@@ -347,47 +347,42 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
     bool matched = false;
     uint8_t frame_type = 0;
     struct mstp_pdu_packet *pkt;
-
     (void)timeout;
-    if (Ringbuf_Empty(&PDU_Queue)) {
-        return 0;
-    }
-    pkt = (struct mstp_pdu_packet *)Ringbuf_Peek(&PDU_Queue);
-    /* is this the reply to the DER? */
-    matched = dlmstp_compare_data_expecting_reply(
-        &mstp_port->InputBuffer[0], mstp_port->DataLength,
-        mstp_port->SourceAddress, (uint8_t *)&pkt->buffer[0], pkt->length,
-        pkt->destination_mac);
 
-    if (!matched) {
-        /* Walk the rest of the ring buffer to see if we can find a match */
-        while (!matched &&
-               (pkt = (struct mstp_pdu_packet *)Ringbuf_Peek_Next(
-                    &PDU_Queue, (uint8_t *)pkt)) != NULL) {
-            matched = dlmstp_compare_data_expecting_reply(
-                &mstp_port->InputBuffer[0], mstp_port->DataLength,
-                mstp_port->SourceAddress, (uint8_t *)&pkt->buffer[0],
-                pkt->length, pkt->destination_mac);
-        }
-        if (!matched) {
-            /* Still didn't find a match so just bail out */
-            usleep(1000);
-            return 0;
-        }
+    pthread_mutex_lock(&Ring_Buffer_Mutex);
+    for (pkt = (struct mstp_pdu_packet *)Ringbuf_Peek(&PDU_Queue);
+         pkt && !matched; pkt = (struct mstp_pdu_packet *)Ringbuf_Peek_Next(
+                              &PDU_Queue, (uint8_t *)pkt)) {
+        /* is this the reply to the DER? */
+        matched = dlmstp_compare_data_expecting_reply(
+            &mstp_port->InputBuffer[0], mstp_port->DataLength,
+            mstp_port->SourceAddress, (uint8_t *)&pkt->buffer[0], pkt->length,
+            pkt->destination_mac);
     }
-    if (pkt->data_expecting_reply) {
-        frame_type = FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY;
+    if (matched) {
+        if (pkt->data_expecting_reply) {
+            frame_type = FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY;
+        } else {
+            frame_type = FRAME_TYPE_BACNET_DATA_NOT_EXPECTING_REPLY;
+        }
+        /* convert the PDU into the MSTP Frame */
+        pdu_len = MSTP_Create_Frame(
+            &mstp_port->OutputBuffer[0], /* <-- loading this */
+            mstp_port->OutputBufferSize, frame_type, pkt->destination_mac,
+            mstp_port->This_Station, (uint8_t *)&pkt->buffer[0], pkt->length);
+        DLMSTP_Statistics.transmit_pdu_counter++;
+        /* This will pop the element no matter where we found it */
+        (void)Ringbuf_Pop_Element(&PDU_Queue, (uint8_t *)pkt, NULL);
     } else {
-        frame_type = FRAME_TYPE_BACNET_DATA_NOT_EXPECTING_REPLY;
+        /* Didn't find a match so wait for application layer to provide one */
+        usleep(1000);
     }
-    /* convert the PDU into the MSTP Frame */
-    pdu_len = MSTP_Create_Frame(
-        &mstp_port->OutputBuffer[0], /* <-- loading this */
-        mstp_port->OutputBufferSize, frame_type, pkt->destination_mac,
-        mstp_port->This_Station, (uint8_t *)&pkt->buffer[0], pkt->length);
-    DLMSTP_Statistics.transmit_pdu_counter++;
-    /* This will pop the element no matter where we found it */
-    (void)Ringbuf_Pop_Element(&PDU_Queue, (uint8_t *)pkt, NULL);
+    pthread_mutex_unlock(&Ring_Buffer_Mutex);
+    if (pdu_len) {
+        debug_printf("DLMSTP: DER Found reply\n");
+    } else {
+        debug_printf("DLMSTP: DER Waiting for reply\n");
+    }
 
     return pdu_len;
 }
