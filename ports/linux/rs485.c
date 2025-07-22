@@ -276,14 +276,15 @@ void RS485_Check_UART_Data(struct mstp_port_struct_t *mstp_port)
     FD_ZERO(&input);
     FD_SET(handle, &input);
     n = select(handle + 1, &input, NULL, NULL, &waiter);
+    if (n < 0) {
+        return;
+    }
     if (FD_ISSET(handle, &input)) {
         n = read(handle, buf, sizeof(buf));
         if (n > 0) {
             FIFO_Add(fifo, &buf[0], n);
-            debug_printf_hex(0, buf, n, "MSTP FIFO Add: ");
         }
     }
-    mstp_port->fifo_used = FIFO_Count(fifo);
 }
 
 void RS485_Cleanup(void)

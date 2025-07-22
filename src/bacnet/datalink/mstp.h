@@ -233,7 +233,6 @@ struct mstp_port_struct_t {
 
     /*Platform-specific port data */
     void *UserData;
-    unsigned fifo_used;
 };
 
 #ifdef __cplusplus

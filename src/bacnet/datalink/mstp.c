@@ -35,10 +35,10 @@
 #include "bacnet/basic/sys/debug.h"
 
 #if PRINT_ENABLED
-#define PRINT_ENABLED_RECEIVE
+#undef PRINT_ENABLED_RECEIVE
 #undef PRINT_ENABLED_RECEIVE_DATA
-#define PRINT_ENABLED_RECEIVE_ERRORS
-#define PRINT_ENABLED_MASTER
+#undef PRINT_ENABLED_RECEIVE_ERRORS
+#undef PRINT_ENABLED_MASTER
 #endif
 
 #if defined(PRINT_ENABLED_RECEIVE)
@@ -271,9 +271,6 @@ void MSTP_Create_And_Send_Frame(
         destination, source, data, data_len);
 
     MSTP_Send_Frame(mstp_port, &mstp_port->OutputBuffer[0], len);
-    printf_master(
-        "MSTP: Sent %s to 0x%02X\n", mstptext_frame_type(frame_type),
-        destination);
     /* FIXME: be sure to reset SilenceTimer() after each octet is sent! */
 }
 
@@ -297,13 +294,12 @@ void MSTP_Receive_Frame_FSM(struct mstp_port_struct_t *mstp_port)
     MSTP_RECEIVE_STATE receive_state = mstp_port->receive_state;
 
     printf_receive(
-        "MSTP Rx: State=%s Avail=%d Data=%02X hCRC=%02X Index=%u EC=%u "
-        "DateLen=%u "
-        "Silence=%u FifoCount=%u\n",
+        "MSTP Rx: State=%s Data=%02X hCRC=%02X Index=%u EC=%u DateLen=%u "
+        "Silence=%u\n",
         mstptext_receive_state(mstp_port->receive_state),
-        mstp_port->DataAvailable, mstp_port->DataRegister, mstp_port->HeaderCRC,
-        mstp_port->Index, mstp_port->EventCount, mstp_port->DataLength,
-        mstp_port->SilenceTimer((void *)mstp_port), mstp_port->fifo_used);
+        mstp_port->DataRegister, mstp_port->HeaderCRC, mstp_port->Index,
+        mstp_port->EventCount, mstp_port->DataLength,
+        mstp_port->SilenceTimer((void *)mstp_port));
     switch (mstp_port->receive_state) {
         case MSTP_RECEIVE_STATE_IDLE:
             /* In the IDLE state, the node waits for
@@ -321,8 +317,6 @@ void MSTP_Receive_Frame_FSM(struct mstp_port_struct_t *mstp_port)
                     /* receive the remainder of the frame. */
                     mstp_port->receive_state = MSTP_RECEIVE_STATE_PREAMBLE;
                 } else {
-                    printf_receive_error(
-                        "MSTP Ignore: %02X\n", mstp_port->DataRegister);
                     /* EatAnOctet */
                     printf_receive_data("\n");
                     /* wait for the start of a frame. */
@@ -357,13 +351,9 @@ void MSTP_Receive_Frame_FSM(struct mstp_port_struct_t *mstp_port)
                     /* receive the remainder of the frame. */
                     mstp_port->receive_state = MSTP_RECEIVE_STATE_HEADER;
                 } else if (mstp_port->DataRegister == 0x55) {
-                    printf_receive_error(
-                        "MSTP Ignore: %02X\n", mstp_port->DataRegister);
                     /* ignore RepeatedPreamble1 */
                     /* wait for the second preamble octet. */
                 } else {
-                    printf_receive_error(
-                        "MSTP Ignore: %02X\n", mstp_port->DataRegister);
                     /* NotPreamble */
                     /* wait for the start of a frame. */
                     mstp_port->receive_state = MSTP_RECEIVE_STATE_IDLE;
@@ -813,9 +803,6 @@ bool MSTP_Master_Node_FSM(struct mstp_port_struct_t *mstp_port)
                 uint8_t destination = mstp_port->OutputBuffer[3];
                 MSTP_Send_Frame(
                     mstp_port, &mstp_port->OutputBuffer[0], (uint16_t)length);
-                printf_master(
-                    "MSTP: Sent %s to 0x%02X\n",
-                    mstptext_frame_type(frame_type), destination);
                 mstp_port->FrameCount++;
                 switch (frame_type) {
                     case FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY:
@@ -1203,10 +1190,6 @@ bool MSTP_Master_Node_FSM(struct mstp_port_struct_t *mstp_port)
                 /* and enter the IDLE state to wait for the next frame. */
                 MSTP_Send_Frame(
                     mstp_port, &mstp_port->OutputBuffer[0], (uint16_t)length);
-                printf_master(
-                    "MSTP: Sent %s to 0x%02X\n",
-                    mstptext_frame_type(mstp_port->OutputBuffer[2]),
-                    mstp_port->OutputBuffer[3]);
                 mstp_port->master_state = MSTP_MASTER_STATE_IDLE;
                 /* clear our flag we were holding for comparison */
                 mstp_port->ReceivedValidFrame = false;
@@ -1319,10 +1302,6 @@ void MSTP_Slave_Node_FSM(struct mstp_port_struct_t *mstp_port)
              */
             MSTP_Send_Frame(
                 mstp_port, &mstp_port->OutputBuffer[0], (uint16_t)length);
-            printf_master(
-                "MSTP: Sent %s to 0x%02X\n",
-                mstptext_frame_type(mstp_port->OutputBuffer[2]),
-                mstp_port->OutputBuffer[3]);
             /* clear our flag we were holding for comparison */
             mstp_port->ReceivedValidFrame = false;
         } else if (
