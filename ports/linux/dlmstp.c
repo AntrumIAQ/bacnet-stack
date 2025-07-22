@@ -373,6 +373,14 @@ static void get_abstime(struct timespec *abstime, unsigned long milliseconds)
     timespec_add_ns(abstime, 1000000 * milliseconds);
 }
 
+static void millisleep(const unsigned long milliseconds)
+{
+    struct timespec abstime;
+    get_abstime(&abstime, milliseconds);
+    while (EINTR ==
+           clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abstime, NULL)) { }
+}
+
 /**
  * @brief The MS/TP state machine uses this function for getting data to
  * send as the reply to a DATA_EXPECTING_REPLY frame, or nothing
@@ -386,7 +394,6 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
     bool matched = false;
     uint8_t frame_type = 0;
     struct mstp_pdu_packet *pkt;
-    struct timespec abstime;
     (void)timeout;
 
     pthread_mutex_lock(&Ring_Buffer_Mutex);
@@ -422,10 +429,7 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
         debug_printf("DLMSTP: DER Found reply\n");
     } else {
         /* Didn't find a match so wait for application layer to provide one */
-        get_abstime(&abstime, 1);
-        while (
-            EINTR ==
-            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abstime, NULL)) { }
+        millisleep(1);
         debug_printf("DLMSTP: DER Waiting for reply\n");
     }
 
