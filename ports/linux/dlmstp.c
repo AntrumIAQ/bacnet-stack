@@ -424,7 +424,7 @@ uint16_t MSTP_Get_Reply(struct mstp_port_struct_t *mstp_port, unsigned timeout)
         /* Didn't find a match so wait for application layer to provide one */
         get_abstime(&abstime, 1);
         while (
-            0 !=
+            EINTR ==
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abstime, NULL)) { }
         debug_printf("DLMSTP: DER Waiting for reply\n");
     }
